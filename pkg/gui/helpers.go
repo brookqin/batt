@@ -3,6 +3,8 @@ package gui
 import (
 	"bytes"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -15,16 +17,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// #cgo CFLAGS: -x objective-c
-// #cgo LDFLAGS: -framework Cocoa -framework ServiceManagement -framework CoreFoundation
-// #include <stdint.h>
-// #include <stdbool.h>
-// // C/ObjC functions are implemented in bridge.m; only prototypes here.
-// void *batt_attachMenuObserver(uintptr_t menuPtr, uintptr_t handle);
-// void batt_releaseMenuObserver(void *obsPtr);
-// bool registerAppWithSMAppService(void);
-// bool unregisterAppWithSMAppService(void);
-// bool isRegisteredWithSMAppService(void);
+/*
+#cgo CFLAGS: -x objective-c
+#cgo LDFLAGS: -framework Cocoa -framework ServiceManagement -framework CoreFoundation -framework SystemConfiguration
+#include "bridge.h"
+*/
 import "C"
 
 //export battMenuWillOpen
@@ -214,4 +211,82 @@ func startAppAtBoot() error {
 	}
 	logrus.Info("Application registered to start at login")
 	return nil
+}
+
+type SystemProxy struct {
+	HTTPHost     string
+	HTTPPort     int
+	HTTPEnabled  bool
+	HTTPSHost    string
+	HTTPSPort    int
+	HTTPSEnabled bool
+	SOCKSHost    string
+	SOCKSPort    int
+	SOCKSEnabled bool
+}
+
+func GetSystemProxy() (*SystemProxy, error) {
+	config := C.GetSystemProxyConfig()
+	if config == nil {
+		return nil, fmt.Errorf("failed to get proxy config")
+	}
+	defer C.FreeProxyConfig(config)
+
+	proxy := &SystemProxy{
+		HTTPEnabled:  config.http_enabled == 1,
+		HTTPPort:     int(config.http_port),
+		HTTPSEnabled: config.https_enabled == 1,
+		HTTPSPort:    int(config.https_port),
+		SOCKSEnabled: config.socks_enabled == 1,
+		SOCKSPort:    int(config.socks_port),
+	}
+
+	if config.http_host != nil {
+		proxy.HTTPHost = C.GoString(config.http_host)
+	}
+
+	if config.https_host != nil {
+		proxy.HTTPSHost = C.GoString(config.https_host)
+	}
+
+	if config.socks_host != nil {
+		proxy.SOCKSHost = C.GoString(config.socks_host)
+	}
+
+	return proxy, nil
+}
+
+func (p *SystemProxy) ProxyForRequest(req *http.Request) (*url.URL, error) {
+	if req == nil {
+		return nil, fmt.Errorf("request is nil")
+	}
+
+	if p.HTTPEnabled && (req.URL.Scheme == "http" || req.URL.Scheme == "https") {
+		return url.Parse(fmt.Sprintf("http://%s:%d", p.HTTPHost, p.HTTPPort))
+	}
+
+	if p.HTTPSEnabled && req.URL.Scheme == "https" {
+		return url.Parse(fmt.Sprintf("https://%s:%d", p.HTTPSHost, p.HTTPSPort))
+	}
+
+	if p.SOCKSEnabled {
+		return url.Parse(fmt.Sprintf("socks5://%s:%d", p.SOCKSHost, p.SOCKSPort))
+	}
+
+	return nil, nil
+}
+
+// NewProxyAwareTransport returns an *http.Transport that respects system proxy settings
+// captured at startup via proxyConfig. Callers can reuse this to reduce duplication.
+func NewProxyAwareTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: func(req *http.Request) (*url.URL, error) {
+			if sp, err := GetSystemProxy(); err == nil && sp != nil {
+				if u, err2 := sp.ProxyForRequest(req); err2 == nil {
+					return u, nil
+				}
+			}
+			return nil, nil
+		},
+	}
 }
