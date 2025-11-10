@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"time"
 
 	pkgerrors "github.com/pkg/errors"
-	"github.com/progrium/darwinkit/dispatch"
 	"github.com/progrium/darwinkit/macos/appkit"
 	"github.com/progrium/darwinkit/macos/foundation"
 	"github.com/progrium/darwinkit/objc"
@@ -136,9 +134,8 @@ func addMenubar(app appkit.Application, apiClient *client.Client) func() {
 	setQuickLimitsItems := map[int]appkit.MenuItem{}
 
 	for _, i := range []int{50, 60, 70, 80, 90} {
-		val := i
 		setQuickLimitsItems[i] = appkit.NewMenuItemWithAction(fmt.Sprintf("Set %d%% Limit", i), fmt.Sprintf("%d", i), func(sender objc.Object) {
-			ret, err := apiClient.SetLimit(val)
+			ret, err := apiClient.SetLimit(i)
 			if err != nil {
 				logrus.WithError(err).Error("Failed to set limit")
 				showAlert("Failed to set limit", ret+err.Error())
@@ -396,31 +393,15 @@ After uninstalling the batt daemon, no charging control will be present on your 
 
 	cleanupFunc := func() {
 		logrus.Info("Cleaning up resources")
+		ReleasePowerFlowObserver(observerPtr)
 
 		// Stop update controller first to prevent any background operations
 		if updateController != nil {
 			updateController.Stop()
 		}
 
-		// Release observer first, then delete handle (critical order!)
-		if observerPtr != nil {
-			ReleasePowerFlowObserver(observerPtr)
-			observerPtr = nil
-		}
-
-		// Wait a bit to ensure observer callbacks complete
-		time.Sleep(100 * time.Millisecond)
-
 		// Delete CGO handle after releasing observer
 		h.Delete()
-
-		// Release retained objects - objc.Release doesn't exist in this darwinkit version
-		// The objects will be properly cleaned up by Go GC and darwinkit internal management
-
-		// Add small delay to ensure proper cleanup of darwinkit objects
-		time.Sleep(50 * time.Millisecond)
-
-		// No global selector target to release in closure-based implementation
 	}
 
 	// The quit action is now simplified to only terminate the app.
@@ -472,15 +453,12 @@ If you want to stop batt completely (menubar app and the daemon), you can use th
 }
 
 func showAlert(msg, body string) {
-	// Always dispatch to main thread for thread safety
-	dispatch.MainQueue().DispatchAsync(func() {
-		alert := appkit.NewAlert()
-		alert.SetIcon(appkit.Image_ImageWithSystemSymbolNameAccessibilityDescription("exclamationmark.triangle", "s"))
-		alert.SetAlertStyle(appkit.AlertStyleWarning)
-		alert.SetMessageText(msg)
-		alert.SetInformativeText(body)
-		alert.RunModal()
-	})
+	alert := appkit.NewAlert()
+	alert.SetIcon(appkit.Image_ImageWithSystemSymbolNameAccessibilityDescription("exclamationmark.triangle", "s"))
+	alert.SetAlertStyle(appkit.AlertStyleWarning)
+	alert.SetMessageText(msg)
+	alert.SetInformativeText(body)
+	alert.RunModal()
 }
 
 func setMenubarImage(menubarStatusItem appkit.StatusItem, daemonInstalled, capable, needUpgrade bool) {

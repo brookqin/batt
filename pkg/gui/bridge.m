@@ -107,7 +107,6 @@ static const NSTimeInterval kMenuUpdateTimerInterval = 1.0;
 extern void battMenuWillOpen(uintptr_t handle);
 extern void battMenuDidClose(uintptr_t handle);
 extern void battMenuTimerFired(uintptr_t handle);
-extern void battMenuAction(uintptr_t handle, long tag);
 
 @interface BattMenuObserver : NSObject
 @property(nonatomic, assign) uintptr_t handle;
