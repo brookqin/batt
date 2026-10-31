@@ -398,7 +398,9 @@ func maintainLoopInner(ignoreMissedLoops bool) bool {
 
 	switch capabilities.ChargeControlMode {
 	case compatibility.ChargeControlFirmware:
-		return maintainFirmwareChargeLimit()
+		ok := maintainFirmwareChargeLimit()
+		maintainFirmwareMagSafeLED()
+		return ok
 	case compatibility.ChargeControlLegacy:
 		return maintainLegacyCharging(ignoreMissedLoops)
 	default:
@@ -407,9 +409,7 @@ func maintainLoopInner(ignoreMissedLoops bool) bool {
 	}
 }
 
-// maintainFirmwareChargeLimit delegates hysteresis enforcement to the
-// firmware. It deliberately does not read battery/charging state or interact
-// with sleep, MagSafe, adapter, or calibration features.
+// maintainFirmwareChargeLimit delegates hysteresis enforcement to the firmware.
 func maintainFirmwareChargeLimit() bool {
 	if calibrationNeedsMaintainLoop() {
 		batteryCharge, err := smcConn.GetBatteryCharge()

@@ -16,6 +16,7 @@ import (
 	"github.com/charlie0129/batt/pkg/compatibility"
 	"github.com/charlie0129/batt/pkg/config"
 	"github.com/charlie0129/batt/pkg/powerinfo"
+	"github.com/charlie0129/batt/pkg/smc"
 	"github.com/charlie0129/batt/pkg/version"
 )
 
@@ -502,12 +503,26 @@ func setControlMagSafeLED(c *gin.Context) {
 		return
 	}
 
+	if capabilities.ChargeControlMode == compatibility.ChargeControlFirmware {
+		maintainLoopInnerLock.Lock()
+		defer maintainLoopInnerLock.Unlock()
+	}
+
 	conf.SetControlMagSafeLED(mode)
 	if err := conf.Save(); err != nil {
 		logrus.Errorf("saveConfig failed: %v", err)
 		c.IndentedJSON(http.StatusInternalServerError, err.Error())
 		_ = c.AbortWithError(http.StatusInternalServerError, err)
 		return
+	}
+
+	if capabilities.ChargeControlMode == compatibility.ChargeControlFirmware && mode == config.ControlMagSafeModeDisabled {
+		if err := smcConn.SetMagSafeLedState(smc.LEDSystem); err != nil {
+			logrus.WithError(err).Error("failed to return MagSafe LED control to the system")
+			c.IndentedJSON(http.StatusInternalServerError, err.Error())
+			_ = c.AbortWithError(http.StatusInternalServerError, err)
+			return
+		}
 	}
 
 	logrus.Infof("set control MagSafe LED to %s", mode)
